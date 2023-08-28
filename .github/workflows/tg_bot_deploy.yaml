@@ -1,0 +1,68 @@
+on:
+  push:
+      paths:
+       - 'telegram_bot/**'
+      branches:
+       - main
+env:
+  REPO: cr.yandex/${{ secrets.YC_CONTAINER_REGISTRY_ID }}/tg-portal-bot
+jobs:
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Login to Yandex Cloud Container Registry
+      uses: yc-actions/yc-cr-login@v1
+      with:
+        yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+    - name: Extract branch name
+      shell: bash
+      run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+      id: extract_branch
+
+    - name: Build, tag, and push image to Yandex Cloud Container Registry
+      env:
+        REPO: ${{ env.REPO }}
+        IMAGE_TAG: ${{steps.extract_branch.outputs.branch}}-${{ github.sha }}
+      run: |
+        docker build -t $REPO:$IMAGE_TAG .
+        docker push $REPO:$IMAGE_TAG
+# Тут могло быть развертывание бота на сервер, но ради 4х дневного проекта я не хочу поднимать новый хост и буду поднимать на уже готовой ВМ)
+#    - name: Connect to VM, clean docker, pull new image, deploy
+#      shell: bash
+#      env:
+#        SSH_PRIVATE_KEY: ${{secrets.SSH_PRIVATE_KEY}}
+#        SSH_KNOWN_HOSTS: ${{secrets.SSH_KNOWN_HOSTS}}
+#        SSH_KEY_PATH: ${{ github.workspace }}/../private.key
+#        USER: ${{ secrets.YC_VM_USERNAME }}
+#        HOST: ${{ secrets.YC_OUTER_IP }}
+#      run: |
+#        mkdir -p ~/.ssh/
+#        echo "$SSH_PRIVATE_KEY" > ../private.key
+#        sudo chmod 600 ../private.key
+#        echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+#        cat >>~/.ssh/config <<END
+#        Host fserver
+#            HostName $HOST
+#            User $USER
+#            IdentityFile ../private.key
+#            StrictHostKeyChecking no
+#        END
+#    - name: Clean-up all docker containers
+#      shell: bash
+#      env:
+#        BRANCH: ${{steps.extract_branch.outputs.branch}}
+#      run: |
+#        ssh fserver 'sudo docker stop $(sudo docker ps -a --format "{{.ID}} {{.Image}}" | grep '$BRANCH' | cut -d" " -f1) || true'
+#        ssh fserver 'sudo docker rm $(sudo docker ps -a --format "{{.ID}} {{.Image}}" | grep '$BRANCH' | cut -d" " -f1) || true'
+#    - name: Pull new image
+#      shell: bash
+#      env:
+#        REPO: ${{ env.REPO }}
+#        IMAGE_TAG: ${{steps.extract_branch.outputs.branch}}-${{ github.sha }}
+#        BOT_TOKEN: ${{ secrets.BOT_TEST_TOKEN }}
+#      run: |
+#        ssh fserver "sudo docker pull $REPO:$IMAGE_TAG"
+#        ssh fserver "sudo docker run -d -e BOT_TOKEN='$BOT_TOKEN' -e BUILD_DATE='$(date)' -e IMAGE='$REPO:$IMAGE_TAG' --restart=always -p 80:5000 $REPO:$IMAGE_TAG"
